@@ -1,0 +1,90 @@
+# OS junk
+.DS_Store
+Thumbs.db
+
+# IDE / Editors
+.idea/
+.vscode/
+*.code-workspace
+
+# Node/JS monorepo
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.turbo/
+.tanstack/
+.vite/
+
+# Coverage / tests
+coverage/
+.junit/
+reports/
+
+# Env and secrets
+.env
+.env.*
+*.env.local
+*.env.development
+*.env.production
+*.env.test
+
+# Top-level archives/exports
+*.zip
+*.tar
+*.tar.gz
+
+# Python (osint-worker)
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Docker / runtime
+*.pid
+*.seed
+docker-data/
+tmp/
+logs/
+*.log
+
+# Frontend specific (Vite/React)
+avesint-ai-client/node_modules/
+avesint-ai-client/dist/
+avesint-ai-client/.vite/
+avesint-ai-client/.tanstack/
+avesint-ai-client/.env
+avesint-ai-client/.env.*
+avesint-ai-client/*.log
+
+# Backend specific (NestJS)
+avesint-ai-server/node_modules/
+avesint-ai-server/dist/
+avesint-ai-server/.env
+avesint-ai-server/.env.*
+avesint-ai-server/api/node_modules/
+avesint-ai-server/api/dist/
+avesint-ai-server/api/.env
+avesint-ai-server/api/.env.*
+avesint-ai-server/api/*.log
+
+# Worker specific
+osint-worker/.env
+osint-worker/.env.*
+osint-worker/__pycache__/
+osint-worker/.venv/
+osint-worker/*.log
+
+# Misc project files not for VCS
+avesint-ai-client.zip
+avesint-ai-server.zip
+osint-worker.zip

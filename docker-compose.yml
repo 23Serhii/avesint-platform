@@ -1,0 +1,104 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-avesint}
+      POSTGRES_PASSWORD: ${DB_PASS:-avesint}
+      POSTGRES_DB: ${DB_NAME:-avesint}
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - avesint-net
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    ports:
+      - '6333:6333'
+      - '6334:6334'
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - avesint-net
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - '11434:11434'
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - avesint-net
+    # Після першого старту треба буде один раз всередині контейнера зробити:
+    #   ollama pull gemma3:12b
+
+  api:
+    build:
+      context: ./avesint-ai-server/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./avesint-ai-server/api/.env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-avesint}
+      DB_PASS: ${DB_PASS:-avesint}
+      DB_NAME: ${DB_NAME:-avesint}
+      QDRANT_URL: http://qdrant:6333
+      # якщо є globalPrefix('api') — в клієнта буде VITE_API_URL=http://localhost:3000/api
+    depends_on:
+      - postgres
+    ports:
+      - '3000:3000'
+    networks:
+      - avesint-net
+
+  client:
+    build:
+      context: ./avesint-ai-client
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./avesint-ai-client/.env
+    environment:
+      VITE_API_URL: http://api:3000/api
+    depends_on:
+      - api
+    ports:
+      - '5173:5173'
+    networks:
+      - avesint-net
+
+  osint-worker:
+    build:
+      context: ./osint-worker
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./osint-worker/.env
+    environment:
+      AVESINT_API_URL: http://api:3000/api
+      OLLAMA_URL: http://ollama:11434
+    depends_on:
+      - api
+      - ollama
+    networks:
+      - avesint-net
+    # якщо хочеш зберегти Telethon-сесію між перезапусками:
+    volumes:
+      - ./osint-worker:/app
+
+networks:
+  avesint-net:
+
+volumes:
+  pgdata:
+  qdrant_data:
+  ollama_data:
