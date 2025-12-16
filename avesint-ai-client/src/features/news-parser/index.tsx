@@ -104,7 +104,7 @@ export function NewsParser() {
                 <div className="ms-auto flex items-center space-x-4">
                     <ThemeSwitch />
                     <ConfigDrawer />
-                    <ProfileDropdown />
+                    {/* <ProfileDropdown /> */}
                 </div>
             </Header>
 

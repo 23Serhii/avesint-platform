@@ -93,7 +93,7 @@ export function DashboardOverviewPage() {
         <div className='ms-auto flex items-center space-x-4'>
           <ThemeSwitch />
           <ConfigDrawer />
-          <ProfileDropdown />
+          {/* <ProfileDropdown /> */}
         </div>
       </Header>
 
@@ -107,8 +107,8 @@ export function DashboardOverviewPage() {
                 Огляд подій і задач
               </h1>
               <p className='text-muted-foreground max-w-2xl text-sm'>
-                Зведений дашборд по подіях, мапі та задачах штабу.
-                Використовуйте цей екран як &quot;one‑glance&quot; огляд стану роботи платформи.
+                Зведений дашборд по подіях, мапі та задачах відділу.
+             
               </p>
             </div>
 

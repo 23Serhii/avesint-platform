@@ -81,7 +81,7 @@ export function AiQueryPanel() {
         query,
         mode: 'analysis',
         scope: { includeEvents: true },
-        time: { preset: 'last_7d' },
+        // ВАЖЛИВО: не передаємо time => бекенд застосує дефолт "останні 60 хв"
         language: 'uk',
         topKPerType: 20,
       })
@@ -127,14 +127,11 @@ export function AiQueryPanel() {
         <div className="space-y-2">
           <Textarea
             rows={3}
-            placeholder="Наприклад: Зроби короткий підсумок по подіях та виконаним задачам за останні 7 днів у дашборді…"
+            placeholder="Наприклад: Зроби підсумок по подіям за останню годину…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
           <div className="flex items-center justify-between gap-2">
-            <div className="text-[11px] text-muted-foreground">
-              Зараз AI працює по подіях (events) платформи. Далі додамо задачі, цілі та звіти.
-            </div>
             <Button
               size="sm"
               disabled={loading || !query.trim()}

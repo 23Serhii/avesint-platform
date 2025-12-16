@@ -20,11 +20,11 @@ import {
 import type { SidebarData } from '../types'
 
 export const sidebarData: SidebarData = {
-    user: {
-        name: 'Оператор OSINT',
-        callsign: 'ops@avesint.ai',
-        avatar: '/avatars/shadcn.jpg',
-    },
+    // user: {
+    //     name: 'Оператор OSINT',
+    //     callsign: 'ops@avesint.ai',
+    //     avatar: '/avatars/shadcn.jpg',
+    // },
     navGroups: [
         {
             title: 'Оперативна обстановка',

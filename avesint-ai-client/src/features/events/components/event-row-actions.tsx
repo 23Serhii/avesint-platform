@@ -86,7 +86,7 @@ export function EventRowActions({ event, onOpen, onCreateTask }: Props) {
                         <span>Створити задачу</span>
                     </DropdownMenu.Item>
 
-                    <DropdownMenu.Item
+                    {/* <DropdownMenu.Item
                         className="mt-1 flex cursor-pointer items-center justify-between gap-2 rounded px-2 py-1.5 outline-none hover:bg-muted"
                         onSelect={handleAnalyzeAI}
                     >
@@ -111,7 +111,7 @@ export function EventRowActions({ event, onOpen, onCreateTask }: Props) {
                     >
                         <span>Спростувати</span>
                         <XCircle className="h-3.5 w-3.5 text-red-600" />
-                    </DropdownMenu.Item>
+                    </DropdownMenu.Item> */}
                 </DropdownMenu.Content>
             </DropdownMenu.Root>
         </div>

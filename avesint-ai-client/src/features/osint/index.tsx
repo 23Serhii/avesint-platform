@@ -1,28 +1,53 @@
-'use client'
+'use client';
 
-import { useCallback, useState } from 'react'
-import { Header } from '@/components/layout/header'
-import { Main } from '@/components/layout/main'
-import { Search } from '@/components/search'
-import { ThemeSwitch } from '@/components/theme-switch'
-import { ConfigDrawer } from '@/components/config-drawer'
-import { ProfileDropdown } from '@/components/profile-dropdown'
-import { Badge } from '@/components/ui/badge'
-import { Card } from '@/components/ui/card'
-import { cn } from '@/lib/utils'
-import { useOsintStream, type OsintStreamItem } from '@/hooks/useOsintStream'
+import { useCallback, useState } from 'react';
+import { cn } from '@/lib/utils';
+import { useOsintStream, type OsintStreamItem } from '@/hooks/useOsintStream';
+import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
+import { ConfigDrawer } from '@/components/config-drawer';
+import { Header } from '@/components/layout/header';
+import { Main } from '@/components/layout/main';
+import { ProfileDropdown } from '@/components/profile-dropdown';
+import { Search } from '@/components/search';
+import { ThemeSwitch } from '@/components/theme-switch';
+
 
 function formatDate(iso?: string | null) {
-    if (!iso) return '—'
-    try {
-        return new Date(iso).toLocaleString('uk-UA', {
-            dateStyle: 'short',
-            timeStyle: 'short',
-        })
-    } catch {
-        return iso
-    }
+  if (!iso) return '—'
+  try {
+    return new Date(iso).toLocaleString('uk-UA', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    })
+  } catch {
+    return iso
+  }
 }
+
+function getDedupInfo(meta: unknown): {
+  matchedEventId?: string
+  qdrantScore?: number
+  createdEventId?: string
+} | null {
+  if (!meta || typeof meta !== 'object') return null
+  const m = meta as Record<string, unknown>
+  const dedup = m.dedup
+  if (!dedup || typeof dedup !== 'object') return null
+
+  const d = dedup as Record<string, unknown>
+
+  const matchedEventId =
+    typeof d.matchedEventId === 'string' ? d.matchedEventId : undefined
+  const createdEventId =
+    typeof d.createdEventId === 'string' ? d.createdEventId : undefined
+
+  const qdrantScore =
+    typeof d.qdrantScore === 'number' ? d.qdrantScore : undefined
+
+  return { matchedEventId, createdEventId, qdrantScore }
+}
+
 
 function priorityColor(p?: OsintStreamItem['item']['priority']) {
     switch (p) {
@@ -67,7 +92,7 @@ export function OsintPage() {
                 <div className="ms-auto flex items-center space-x-4">
                     <ThemeSwitch />
                     <ConfigDrawer />
-                    <ProfileDropdown />
+                    {/* <ProfileDropdown /> */}
                 </div>
             </Header>
 
@@ -92,55 +117,78 @@ export function OsintPage() {
                         </div>
                     )}
 
-                    {items.map((entry) => {
-                        const { source, item } = entry
-                        const credibilityPercent =
-                            typeof item.credibility === 'number'
-                                ? Math.round(item.credibility * 100)
-                                : null
+                  {items.map((entry) => {
+                    const { source, item } = entry
+                    const credibilityPercent =
+                      typeof item.credibility === 'number'
+                        ? Math.round(item.credibility * 100)
+                        : null
 
-                        return (
-                            <Card
-                                key={entry.id + item.externalId}
-                                className="border-border/60 bg-background/80 px-3 py-2"
-                            >
-                                <div className="flex flex-wrap items-start justify-between gap-2">
-                                    <div className="flex flex-1 flex-col gap-1">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <Badge
-                                                variant="outline"
-                                                className={cn(
-                                                    'border px-2 py-0.5 text-[11px] font-medium',
-                                                    sourceCategoryColor(source.category),
-                                                )}
-                                            >
-                                                {source.name}
-                                                {source.category && ` · ${source.category}`}
-                                            </Badge>
+                    const dedup = getDedupInfo(item.meta)
 
-                                            {item.priority && (
-                                                <Badge
-                                                    variant="outline"
-                                                    className={cn(
-                                                        'border px-2 py-0.5 text-[11px] font-semibold uppercase',
-                                                        priorityColor(item.priority),
-                                                    )}
-                                                >
-                                                    {item.priority}
-                                                </Badge>
-                                            )}
+                    return (
+                      <Card
+                        key={entry.id + item.externalId}
+                        className="border-border/60 bg-background/80 px-3 py-2"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="flex flex-1 flex-col gap-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  'border px-2 py-0.5 text-[11px] font-medium',
+                                  sourceCategoryColor(source.category),
+                                )}
+                              >
+                                {source.name}
+                                {source.category && ` · ${source.category}`}
+                              </Badge>
 
-                                            {credibilityPercent !== null && (
-                                                <Badge
-                                                    variant="outline"
-                                                    className="border px-2 py-0.5 text-[11px] text-muted-foreground"
-                                                >
-                                                    cred: {credibilityPercent}%
-                                                </Badge>
-                                            )}
-                                        </div>
+                              {item.priority && (
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    'border px-2 py-0.5 text-[11px] font-semibold uppercase',
+                                    priorityColor(item.priority),
+                                  )}
+                                >
+                                  {item.priority}
+                                </Badge>
+                              )}
 
-                                        {item.title && (
+                              {credibilityPercent !== null && (
+                                <Badge
+                                  variant="outline"
+                                  className="border px-2 py-0.5 text-[11px] text-muted-foreground"
+                                >
+                                  cred: {credibilityPercent}%
+                                </Badge>
+                              )}
+
+                              {dedup?.matchedEventId && (
+                                <Badge
+                                  variant="outline"
+                                  className="border px-2 py-0.5 text-[11px] text-emerald-600"
+                                >
+                                  MERGED → event {dedup.matchedEventId.slice(0, 8)}
+                                  {typeof dedup.qdrantScore === 'number' &&
+                                    ` (score ${dedup.qdrantScore.toFixed(2)})`}
+                                </Badge>
+                              )}
+
+                              {dedup?.createdEventId && (
+                                <Badge
+                                  variant="outline"
+                                  className="border px-2 py-0.5 text-[11px] text-sky-600"
+                                >
+                                  NEW EVENT → {dedup.createdEventId.slice(0, 8)}
+                                </Badge>
+                              )}
+                            </div>
+
+
+                            {item.title && (
                                             <h2 className="text-sm font-semibold leading-snug">
                                                 {item.title}
                                             </h2>

@@ -1,5 +1,6 @@
 // src/lib/api/ai-query.ts
-import { api } from './client'
+import { api } from './client';
+
 
 export type AiQueryMode = 'search' | 'analysis' | 'report'
 
@@ -13,7 +14,7 @@ export interface AiDataScope {
 export interface AiTimeFilter {
   from?: string
   to?: string
-  preset?: 'last_24h' | 'last_7d' | 'last_30d'
+  preset?: 'last_24h' | 'last_48h' | 'last_7d' | 'last_30d'
 }
 
 export interface AiGeoFilter {

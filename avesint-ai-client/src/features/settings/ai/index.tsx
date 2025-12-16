@@ -201,7 +201,7 @@ export function SettingsAI() {
                         <div>
                             <Label className="text-sm">AI‑асистент</Label>
                             <p className="text-xs text-muted-foreground">
-                                Вмикає панель AI на сторінках (за наявності підтримки).
+                                Вмикає панель AI на сторінках.
                             </p>
                         </div>
                         <Switch
@@ -219,8 +219,7 @@ export function SettingsAI() {
                         <Label className="text-sm">Додати Telegram‑канал</Label>
                         <p className="text-xs text-muted-foreground">
                             Вставте посилання на канал або @handle. Після збереження воркер
-                            (osint-worker) почне слухати цей канал (за умови перезапуску або
-                            регулярного оновлення списку джерел).
+                            почне слухати цей канал.
                         </p>
                     </div>
 
@@ -269,14 +268,14 @@ export function SettingsAI() {
                                 активність джерела, а також видаляти джерела.
                             </p>
                         </div>
-                        <Button
+                        {/* <Button
                             variant="outline"
                             size="sm"
                             onClick={handleEnableAiForAll}
                             disabled={sources.length === 0 || togglingId === '__all__'}
                         >
                             {togglingId === '__all__' ? 'Оновлення…' : 'AI для всіх'}
-                        </Button>
+                        </Button> */}
                     </div>
 
                     {sourcesLoading && (
@@ -360,7 +359,7 @@ export function SettingsAI() {
                                                     >
                                                         {s.isActive ? 'Деактивувати' : 'Активувати'}
                                                     </Button>
-                                                    <Button
+                                                    {/* <Button
                                                         variant={aiEnabled ? 'default' : 'outline'}
                                                         size="sm"
                                                         className="h-7 px-2 text-[10px]"
@@ -372,7 +371,7 @@ export function SettingsAI() {
                                                             : aiEnabled
                                                                 ? 'AI: увімкнено'
                                                                 : 'AI: вимкнено'}
-                                                    </Button>
+                                                    </Button> */}
                                                     <Button
                                                         variant="destructive"
                                                         size="sm"
@@ -393,7 +392,7 @@ export function SettingsAI() {
 
                     <div className="mt-2 flex items-center gap-2">
                         <Button size="sm" onClick={handleSave}>
-                            Зберегти базові AI‑налаштування
+                            Зберегти
                         </Button>
                         {saved && (
                             <div className="text-xs text-emerald-600">Збережено</div>
