@@ -12,6 +12,7 @@ import {
   BadRequestException,
   UseGuards,
   Req,
+  Header,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { EventsService } from './events.service';
@@ -45,6 +46,15 @@ export class EventsController {
     return this.eventsService.listEvents(parsed.data);
   }
 
+  @Get(':id/evidence-debug')
+  async evidenceDebug(@Param('id') id: string) {
+    const event = await this.eventsService.getEventById(id);
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+    return this.eventsService.listEvidenceDebug(id);
+  }
+
   @Get(':id')
   async getById(@Param('id') id: string) {
     const event = await this.eventsService.getEventById(id);
@@ -52,6 +62,21 @@ export class EventsController {
       throw new NotFoundException('Event not found');
     }
     return event;
+  }
+
+  @Get(':id/evidence')
+  @Header(
+    'Cache-Control',
+    'no-store, no-cache, must-revalidate, proxy-revalidate',
+  )
+  @Header('Pragma', 'no-cache')
+  @Header('Expires', '0')
+  async evidence(@Param('id') id: string) {
+    const event = await this.eventsService.getEventById(id);
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+    return this.eventsService.listEvidence(id);
   }
 
   @Roles(Role.ADMIN, Role.OFFICER, Role.ANALYST)

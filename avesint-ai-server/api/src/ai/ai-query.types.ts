@@ -10,9 +10,9 @@ export interface AiDataScope {
 }
 
 export interface AiTimeFilter {
-  from?: string // ISO
-  to?: string   // ISO
-  preset?: 'last_24h' | 'last_7d' | 'last_30d'
+  from?: string; // ISO
+  to?: string; // ISO
+  preset?: 'last_24h' | 'last_48h' | 'last_7d' | 'last_30d';
 }
 
 export interface AiGeoFilter {

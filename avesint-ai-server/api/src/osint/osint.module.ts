@@ -6,18 +6,19 @@ import { OsintService } from './osint.service';
 import { OsintGateway } from './osint.gateway';
 import { OsintSourceEntity } from './osint-source.entity';
 import { OsintItemEntity } from './osint-item.entity';
-import { EventsModule } from '../events/events.module'; // <-- додаємо
+import { EventsModule } from '../events/events.module';
 import { QdrantService } from '../common/qdrant.service';
-import { AiGeoService } from '../common/ai-geo.service'; // <-- додали
-import { AiClassificationService } from '../common/ai-classification.service'; // <-- новий
+import { AiGeoService } from '../common/ai-geo.service';
+import { AiClassificationService } from '../common/ai-classification.service';
 import { OsintSourcesController } from './osint-sources.controller';
+import { OsintItemsController } from './osint-items.controller';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([OsintSourceEntity, OsintItemEntity]),
-    EventsModule, // <-- тут
+    EventsModule,
   ],
-  controllers: [OsintController, OsintSourcesController],
+  controllers: [OsintController, OsintSourcesController, OsintItemsController],
   providers: [
     OsintService,
     OsintGateway,

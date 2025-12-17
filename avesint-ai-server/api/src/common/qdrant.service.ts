@@ -255,6 +255,10 @@ export class QdrantService {
         this.collection,
       )}/points?wait=true`;
 
+      const timeUnixMs = Number.isFinite(new Date(time).getTime())
+        ? new Date(time).getTime()
+        : null;
+
       const body = {
         points: [
           {
@@ -267,6 +271,7 @@ export class QdrantService {
               summary: summary ?? null,
               content: description ?? summary ?? '',
               time,
+              timeUnixMs, // ✅ додали
               severity: severity ?? null,
               status: status ?? null,
               sourceName: sourceName ?? null,

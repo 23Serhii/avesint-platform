@@ -5,21 +5,22 @@ import { Injectable } from '@nestjs/common';
 import type { OsintItemDto } from './dto/osint-ingest.dto';
 
 @WebSocketGateway({
-  namespace: '/osint', // клієнт буде конектитись до /osint
-  cors: { origin: '*' }, // для dev, у prod звузиш
+  namespace: '/osint',
+  cors: {
+    origin: ['http://localhost:5173'],
+    credentials: false, // ✅ важливо, раз клієнт без cookies
+  },
 })
 @Injectable()
 export class OsintGateway {
   @WebSocketServer()
   server!: Server;
 
-  // Викликаємо з сервісу, коли зʼявився новий OsintItem
   broadcastNewItem(payload: {
     id: string;
     source: { id: string; name: string; category?: string };
     item: OsintItemDto;
   }) {
-    // ось тут відправляється подія всім підписаним клієнтам
     this.server.emit('osint:item', payload);
   }
 }

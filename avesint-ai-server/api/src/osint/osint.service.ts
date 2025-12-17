@@ -1,5 +1,5 @@
 // api/src/osint/osint.service.ts
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { OsintIngestDto } from './dto/osint-ingest.dto';
@@ -11,8 +11,18 @@ import { QdrantService } from '../common/qdrant.service';
 import { AiGeoService } from '../common/ai-geo.service';
 import { AiClassificationService } from '../common/ai-classification.service';
 
+type JsonRecord = Record<string, unknown>;
+
+function asRecord(v: unknown): JsonRecord {
+  return v && typeof v === 'object' && !Array.isArray(v)
+    ? (v as JsonRecord)
+    : {};
+}
+
 @Injectable()
 export class OsintService {
+  private readonly logger = new Logger(OsintService.name);
+
   constructor(
     private readonly gateway: OsintGateway,
 
@@ -30,24 +40,13 @@ export class OsintService {
     private readonly aiClass: AiClassificationService,
   ) {}
 
-  // Проста утиліта для перерахунку reliability на основі лічильників
-  private recalcSourceReliability(
-    source: OsintSourceEntity,
-  ): OsintSourceEntity {
-    if (source.totalItems <= 0) {
-      source.reliability = 0.5;
-      return source;
-    }
-
-    const greyItems =
-      source.totalItems - source.confirmedItems - source.disprovedItems;
-
-    const raw = (source.confirmedItems + 0.5 * greyItems) / source.totalItems;
-
-    // Страхуємо від виходу за межі [0,1]
-    source.reliability = Math.max(0, Math.min(1, raw));
-    return source;
-  }
+  private readonly allowedSourceCategories = new Set([
+    'official',
+    'osint-team',
+    'local-news',
+    'enemy-prop',
+    'unknown',
+  ]);
 
   private mapPriorityToSeverity(
     priority?: OsintIngestDto['item']['priority'],
@@ -65,6 +64,196 @@ export class OsintService {
     }
   }
 
+  async reviewOsintItem(
+    osintItemId: string,
+    verdict: 'confirmed' | 'disproved' | 'unknown',
+  ): Promise<{
+    ok: true;
+    osintItemId: string;
+    sourceId: string;
+    sourceReliability: number;
+    verdict: 'confirmed' | 'disproved' | 'unknown';
+    previousVerdict: 'confirmed' | 'disproved' | 'unknown';
+    updatedEvents: Array<{
+      eventId: string;
+      status: 'pending' | 'confirmed' | 'disproved';
+    }>;
+  } | null> {
+    const runner = this.itemRepo.manager.connection.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+
+    try {
+      const item = await runner.manager.findOne(OsintItemEntity, {
+        where: { id: osintItemId },
+      });
+      if (!item) {
+        await runner.rollbackTransaction();
+        return null;
+      }
+
+      const source = await runner.manager.findOne(OsintSourceEntity, {
+        where: { id: item.sourceId },
+      });
+      if (!source) {
+        await runner.rollbackTransaction();
+        return null;
+      }
+
+      const meta = asRecord(item.meta);
+      const review = asRecord(meta.review);
+      const prev =
+        typeof review.verdict === 'string'
+          ? (review.verdict as 'confirmed' | 'disproved' | 'unknown')
+          : 'unknown';
+
+      if (prev !== verdict) {
+        if (prev === 'confirmed') {
+          source.confirmedItems = Math.max(0, source.confirmedItems - 1);
+        }
+        if (prev === 'disproved') {
+          source.disprovedItems = Math.max(0, source.disprovedItems - 1);
+        }
+
+        if (verdict === 'confirmed') source.confirmedItems += 1;
+        if (verdict === 'disproved') source.disprovedItems += 1;
+
+        const updatedSource = this.recalcSourceReliability(source);
+
+        item.meta = {
+          ...meta,
+          review: {
+            ...review,
+            verdict,
+            reviewedAt: new Date().toISOString(),
+          },
+        };
+
+        await runner.manager.save(OsintSourceEntity, updatedSource);
+        await runner.manager.save(OsintItemEntity, item);
+      }
+
+      const eventIdsRes = await runner.query(
+        `
+          SELECT event_id
+          FROM event_evidence
+          WHERE osint_item_id = $1
+        `,
+        [osintItemId],
+      );
+
+      const eventIds = Array.isArray(eventIdsRes)
+        ? eventIdsRes.map((r: unknown) => String((r as any).event_id))
+        : [];
+
+      const updatedEvents: Array<{
+        eventId: string;
+        status: 'pending' | 'confirmed' | 'disproved';
+      }> = [];
+
+      for (const eventId of eventIds) {
+        const countsRes = await runner.query(
+          `
+            SELECT
+              SUM(CASE WHEN (i.meta->'review'->>'verdict') = 'confirmed' THEN 1 ELSE 0 END) AS confirmed_cnt,
+              SUM(CASE WHEN (i.meta->'review'->>'verdict') = 'disproved' THEN 1 ELSE 0 END) AS disproved_cnt
+            FROM event_evidence ee
+            JOIN osint_items i ON i.id = ee.osint_item_id
+            WHERE ee.event_id = $1
+          `,
+          [eventId],
+        );
+
+        const row =
+          Array.isArray(countsRes) && countsRes.length > 0 ? countsRes[0] : {};
+        const confirmedCnt = Number((row as any).confirmed_cnt ?? 0);
+        const disprovedCnt = Number((row as any).disproved_cnt ?? 0);
+
+        let nextStatus: 'pending' | 'confirmed' | 'disproved' = 'pending';
+        if (confirmedCnt > 0 && disprovedCnt === 0) nextStatus = 'confirmed';
+        else if (disprovedCnt > 0 && confirmedCnt === 0)
+          nextStatus = 'disproved';
+        else nextStatus = 'pending';
+
+        await runner.query(
+          `
+            UPDATE events
+            SET status = $2, updated_at = now()
+            WHERE id = $1
+          `,
+          [eventId, nextStatus],
+        );
+
+        updatedEvents.push({ eventId, status: nextStatus });
+      }
+
+      const freshSource = await runner.manager.findOne(OsintSourceEntity, {
+        where: { id: source.id },
+      });
+
+      await runner.commitTransaction();
+
+      return {
+        ok: true,
+        osintItemId: item.id,
+        sourceId: source.id,
+        sourceReliability: freshSource?.reliability ?? source.reliability,
+        verdict,
+        previousVerdict: prev,
+        updatedEvents,
+      };
+    } catch (e) {
+      await runner.rollbackTransaction();
+      throw e;
+    } finally {
+      await runner.release();
+    }
+  }
+
+  private recalcSourceReliability(
+    source: OsintSourceEntity,
+  ): OsintSourceEntity {
+    if (source.totalItems <= 0) {
+      source.reliability = 0.5;
+      return source;
+    }
+
+    const greyItems =
+      source.totalItems - source.confirmedItems - source.disprovedItems;
+
+    const raw = (source.confirmedItems + 0.5 * greyItems) / source.totalItems;
+
+    source.reliability = Math.max(0, Math.min(1, raw));
+    return source;
+  }
+
+  private buildShortTitle(dto: OsintIngestDto): string {
+    const baseForTitle = dto.item.title || dto.item.summary || dto.item.content;
+    let title = String(baseForTitle ?? '').trim();
+
+    const firstSentenceMatch = title.match(/^(.+?[.!?])\s/u);
+    if (firstSentenceMatch) {
+      title = firstSentenceMatch[1];
+    }
+
+    const MAX_TITLE_LEN = 80;
+    if (title.length > MAX_TITLE_LEN) {
+      title = title.slice(0, MAX_TITLE_LEN - 1).trimEnd() + '…';
+    }
+
+    return title || 'OSINT‑подія';
+  }
+
+  private buildFullText(dto: OsintIngestDto): string {
+    return [
+      dto.item.title ?? '',
+      dto.item.summary ?? '',
+      dto.item.content ?? '',
+    ]
+      .join('\n')
+      .trim();
+  }
+
   async ingest(dto: OsintIngestDto) {
     let source = await this.upsertSource(dto.source);
 
@@ -77,71 +266,121 @@ export class OsintService {
     const severity = this.mapPriorityToSeverity(dto.item.priority);
     const occurredAt = dto.item.eventDate ?? dto.item.parseDate;
 
-    // 🔹 1) Повний текст
-    const fullText =
-      (dto.item.title ?? '') +
-      '\n' +
-      (dto.item.summary ?? '') +
-      '\n' +
-      dto.item.content;
-
-    // 🔹 2) Summary – як і раніше
+    const fullText = this.buildFullText(dto);
     const summary = dto.item.summary || dto.item.content;
+    const title = this.buildShortTitle(dto);
 
-    // 🔹 3) Короткий заголовок: окремо формуємо з summary / content
-    const baseForTitle = dto.item.title || dto.item.summary || dto.item.content;
-    let title = baseForTitle.trim();
+    const [geoPoint, classification] = await Promise.all([
+      this.aiGeo.extractLocation(fullText),
+      this.aiClass.classify(fullText),
+    ]);
 
-    // беремо перше речення до крапки/знака питання/оклику
-    const firstSentenceMatch = title.match(/^(.+?[.!?])\s/u);
-    if (firstSentenceMatch) {
-      title = firstSentenceMatch[1];
+    const dedupQueryText = [
+      dto.item.type ?? 'osint_report',
+      summary ?? '',
+      dto.item.content ?? '',
+    ]
+      .join('\n')
+      .trim();
+
+    const candidate = await this.eventsService.findDedupCandidate({
+      queryText: dedupQueryText,
+      type: dto.item.type || 'osint_report',
+      occurredAtIso: occurredAt,
+      latitude: geoPoint?.latitude ?? null,
+      longitude: geoPoint?.longitude ?? null,
+    });
+
+    let event = null as Awaited<ReturnType<EventsService['getEventById']>>;
+
+    if (candidate) {
+      const existingEvent = await this.eventsService.getEventById(
+        candidate.eventId,
+      );
+
+      if (existingEvent) {
+        const { inserted } = await this.eventsService.attachEvidence({
+          eventId: candidate.eventId,
+          osintItemId: osintItem.id,
+          relation: 'support',
+          weight:
+            typeof dto.item.credibility === 'number'
+              ? dto.item.credibility
+              : null,
+        });
+
+        this.logger.log(
+          `attachEvidence(dedup) eventId=${candidate.eventId} osintItemId=${osintItem.id} inserted=${inserted}`,
+        );
+
+        await this.itemRepo.manager.query(
+          `
+            UPDATE events
+            SET updated_at = now()
+            WHERE id = $1
+          `,
+          [candidate.eventId],
+        );
+
+        event = existingEvent;
+      } else {
+        this.logger.warn(
+          `Dedup candidate points to missing event in DB: ${candidate.eventId} (will create new event)`,
+        );
+      }
     }
 
-    // обрізаємо до 80 символів, щоб не було «стіни тексту» в заголовку
-    const MAX_TITLE_LEN = 80;
-    if (title.length > MAX_TITLE_LEN) {
-      title = title.slice(0, MAX_TITLE_LEN - 1).trimEnd() + '…';
-    }
-
-    // fallback, якщо раптом все пусте
-    if (!title) {
-      title = 'OSINT‑подія';
-    }
-
-    // 1) AI геолокація
-    const geoPoint = await this.aiGeo.extractLocation(fullText);
-
-    // 2) AI класифікація події
-    const classification = await this.aiClass.classify(fullText);
-
-    // 3) Створюємо Event з координатами
-    const event = await this.eventsService.createEvent(
-      {
-        title,
-        summary,
-        description: dto.item.content, // 🔹 повний текст у description
+    if (!event) {
+      const fingerprint = this.eventsService.buildFingerprint({
         type: dto.item.type || 'osint_report',
-        severity,
-        status: 'pending',
-        occurredAt,
-        confidence: dto.item.credibility ?? undefined,
-        externalRef: dto.item.externalId,
-        latitude: geoPoint?.latitude ?? undefined,
-        longitude: geoPoint?.longitude ?? undefined,
-        imageUrl: dto.item.mediaUrl ?? undefined,
-      } as any,
-      undefined,
-      null,
-    );
+        occurredAtIso: occurredAt,
+        latitude: geoPoint?.latitude ?? null,
+        longitude: geoPoint?.longitude ?? null,
+      });
 
-    // 4) Визначаємо, чи це "рутинна" подія
+      const created = await this.eventsService.createEvent(
+        {
+          title,
+          summary,
+          description: dto.item.content,
+          type: dto.item.type || 'osint_report',
+          severity,
+          status: 'pending',
+          occurredAt,
+          confidence: dto.item.credibility ?? undefined,
+          externalRef: dto.item.externalId,
+          latitude: geoPoint?.latitude ?? undefined,
+          longitude: geoPoint?.longitude ?? undefined,
+          imageUrl: dto.item.mediaUrl ?? undefined,
+          tags: dto.item.tags ?? null,
+          fingerprint,
+        } as any,
+        undefined,
+        null,
+      );
+
+      const { inserted } = await this.eventsService.attachEvidence({
+        eventId: created.id,
+        osintItemId: osintItem.id,
+        relation: 'support',
+        weight:
+          typeof dto.item.credibility === 'number'
+            ? dto.item.credibility
+            : null,
+      });
+
+      this.logger.log(
+        `attachEvidence(created) eventId=${created.id} osintItemId=${osintItem.id} inserted=${inserted}`,
+      );
+
+      event = created;
+    }
+
     const isRoutine = this.qdrant.isRoutineFromPayload({
       tags: osintItem.tags ?? undefined,
       aiClassification: classification ?? undefined,
     });
 
-    // 5) Пушимо OSINT в Qdrant
     void this.qdrant.upsertOsintItem({
       id: osintItem.id,
       type: 'osint',
@@ -149,32 +388,32 @@ export class OsintService {
       summary: osintItem.summary,
       content: osintItem.content,
       time: osintItem.parseDate.toISOString(),
-      severity: event.severity,
-      status: event.status,
+      severity: event?.severity ?? severity,
+      status: event?.status ?? 'pending',
       sourceName: source.name,
       tags: osintItem.tags ?? [],
       aiClassification: classification ?? null,
       isRoutine,
     });
 
-    // 6) Пишемо Event в Qdrant
-    void this.qdrant.upsertEvent({
-      id: event.id,
-      title: event.title ?? null,
-      summary: event.summary ?? null,
-      description: event.description ?? null,
-      time: event.occurredAt,
-      severity: event.severity ?? null,
-      status: event.status ?? null,
-      latitude: event.latitude ?? null,
-      longitude: event.longitude ?? null,
-      tags: osintItem.tags ?? null,
-      aiClassification: classification ?? null,
-      sourceName: source.name,
-      isRoutine,
-    });
+    if (event?.id) {
+      void this.qdrant.upsertEvent({
+        id: event.id,
+        title: event.title ?? null,
+        summary: event.summary ?? null,
+        description: event.description ?? null,
+        time: event.occurredAt,
+        severity: event.severity ?? null,
+        status: event.status ?? null,
+        latitude: event.latitude ?? null,
+        longitude: event.longitude ?? null,
+        tags: osintItem.tags ?? null,
+        aiClassification: classification ?? null,
+        sourceName: source.name,
+        isRoutine,
+      });
+    }
 
-    // 7) Відправляємо по WebSocket (як було)
     this.gateway.broadcastNewItem({
       id: osintItem.id,
       source: {
@@ -203,18 +442,36 @@ export class OsintService {
         meta: {
           ...(osintItem.meta ?? {}),
           aiClassification: classification ?? undefined,
+          dedup:
+            candidate && event?.id === candidate.eventId
+              ? {
+                  matchedEventId: candidate.eventId,
+                  qdrantScore: candidate.score,
+                }
+              : { createdEventId: event?.id },
         },
       },
     });
 
-    return { status: 'ok', osintItemId: osintItem.id };
+    return {
+      status: 'ok',
+      osintItemId: osintItem.id,
+      eventId: event?.id ?? null,
+    };
   }
 
-  // 🔹 Повертаємо upsertSource з попередньої версії
   private async upsertSource(src: OsintIngestDto['source']) {
     let existing = await this.sourceRepo.findOne({
       where: { externalId: src.externalId },
     });
+
+    const incomingCategory =
+      typeof src.category === 'string' ? src.category.trim() : null;
+
+    const safeIncomingCategory =
+      incomingCategory && this.allowedSourceCategories.has(incomingCategory)
+        ? incomingCategory
+        : null;
 
     if (!existing) {
       existing = this.sourceRepo.create({
@@ -222,8 +479,7 @@ export class OsintService {
         type: src.type,
         name: src.name,
         url: src.url ?? null,
-        category: src.category ?? null,
-        // reliability поки базово 0.5, далі будемо міняти від верифікацій
+        category: safeIncomingCategory ?? null,
         reliability: 0.5,
         totalItems: 0,
         confirmedItems: 0,
@@ -233,23 +489,23 @@ export class OsintService {
       existing.name = src.name;
       existing.type = src.type;
       existing.url = src.url ?? existing.url ?? null;
-      existing.category = src.category ?? existing.category ?? null;
+
+      if (!existing.category && safeIncomingCategory) {
+        existing.category = safeIncomingCategory;
+      }
     }
 
     return this.sourceRepo.save(existing);
   }
 
-  // 🔹 Повертаємо createOsintItem з попередньої версії
   private async createOsintItem(
     source: OsintSourceEntity,
     item: OsintIngestDto['item'],
   ): Promise<OsintItemEntity> {
-    // Спочатку перевіряємо, чи такий externalId вже є
     const existing = await this.itemRepo.findOne({
       where: { externalId: item.externalId },
     });
 
-    // Якщо вже існує — оновлюємо "мʼякі" поля
     if (existing) {
       existing.title = item.title ?? existing.title ?? null;
       existing.content = item.content ?? existing.content;
@@ -276,12 +532,11 @@ export class OsintService {
       return this.itemRepo.save(existing);
     }
 
-    // Якщо запису ще немає – створюємо новий
     const parseDate = new Date(item.parseDate);
     const eventDate = item.eventDate ? new Date(item.eventDate) : null;
 
     const entity = this.itemRepo.create({
-      sourceId: source.id,
+      source, // ✅ КРИТИЧНО: так заповниться source_id
       externalId: item.externalId,
       kind: item.kind,
       title: item.title ?? null,
